@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ name }}</title>
+<style>
+  :root {
+    --bg: #f4f1ea; --panel: #fffdf8; --ink: #23201b; --muted: #7a7366;
+    --line: #e2dccf; --accent: #2f6f5e; --accent-ink: #fff; --user: #e6efe9; --warn: #a4442b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a; --panel: #1f2123; --ink: #ecebe6; --muted: #9a988f;
+      --line: #303336; --accent: #6fbfa6; --accent-ink: #10231d; --user: #24332e; --warn: #f0937a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid; grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  main { display: flex; flex-direction: column; height: 100vh; min-width: 0; }
+  header {
+    display: flex; align-items: baseline; gap: 12px; padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+  header small { color: var(--muted); }
+  header button { margin-left: auto; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+    background: transparent; color: var(--muted); padding: 4px 10px;
+  }
+  button:hover { color: var(--ink); }
+  #log { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 70ch; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user { align-self: flex-end; background: var(--user); border-bottom-right-radius: 4px; }
+  .msg.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.note { align-self: center; color: var(--muted); font-size: 14px; padding: 2px; }
+  .msg.error { align-self: center; color: var(--warn); font-size: 14px; border: 1px solid var(--warn); }
+  .msg.reminder { align-self: center; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .empty { margin: auto; text-align: center; color: var(--muted); max-width: 40ch; }
+  form { display: flex; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--line); }
+  #box {
+    flex: 1; font: inherit; color: inherit; background: var(--panel); resize: none;
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; min-height: 46px; max-height: 160px;
+  }
+  #box:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #send { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); padding: 0 18px; font-weight: 600; }
+  #send:disabled { opacity: .5; cursor: default; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); height: 100vh; overflow-y: auto; padding: 16px 20px; }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 20px 0 8px; }
+  aside h2:first-child { margin-top: 4px; }
+  aside ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 15px; }
+  aside li.none { color: var(--muted); font-size: 14px; }
+  aside label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  aside input { margin-top: 5px; accent-color: var(--accent); }
+  .done { color: var(--muted); text-decoration: line-through; }
+  .when { display: block; color: var(--muted); font-size: 13px; }
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; }
+    aside { display: none; }
+    header, form { padding-left: 16px; padding-right: 16px; }
+    #log { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>{{ name }}</h1>
+    <small>running locally on {{ model }}</small>
+    <button id="clear" type="button" title="Forget the conversation (to-dos, notes and reminders stay)">Clear chat</button>
+  </header>
+  <div id="log" aria-live="polite"></div>
+  <form id="form">
+    <textarea id="box" rows="1" placeholder="Message {{ name }}…" autofocus></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+</main>
+<aside>
+  <h2>To-do</h2><ul id="todos"></ul>
+  <h2>Reminders</h2><ul id="reminders"></ul>
+  <h2>Notes</h2><ul id="notes"></ul>
+</aside>
+<script>
+const log = document.getElementById("log"), box = document.getElementById("box"),
+      send = document.getElementById("send"), form = document.getElementById("form");
+
+// textContent everywhere: the model's text is never treated as HTML.
+function add(kind, text) {
+  log.querySelector(".empty")?.remove();
+  const el = document.createElement("div");
+  el.className = "msg " + kind;
+  el.textContent = text;
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+function showEmpty() {
+  const el = document.createElement("p");
+  el.className = "empty";
+  el.textContent = "Say hello, or try “remind me to stretch in 20 minutes”, “add milk to my list” or “what’s the weather in Chicago?”";
+  log.replaceChildren(el);
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Something went wrong (" + res.status + ").");
+  return data;
+}
+
+function fill(id, items, emptyText, render) {
+  const list = document.getElementById(id);
+  list.replaceChildren(...(items.length ? items.map(render) : [Object.assign(document.createElement("li"), {className: "none", textContent: emptyText})]));
+}
+
+async function refreshSidebar() {
+  let state;
+  try { state = await api("/api/state"); } catch { return; }
+  fill("todos", state.todos, "Nothing to do", t => {
+    const li = document.createElement("li"), label = document.createElement("label"),
+          check = document.createElement("input"), span = document.createElement("span");
+    check.type = "checkbox"; check.checked = !!t.done;
+    check.onchange = () => api(`/api/todos/${t.id}/toggle`, {done: check.checked}).then(refreshSidebar);
+    span.textContent = t.text; if (t.done) span.className = "done";
+    label.append(check, span); li.append(label); return li;
+  });
+  fill("reminders", state.reminders, "None coming up", r => {
+    const li = document.createElement("li"), when = document.createElement("span");
+    li.textContent = r.text; when.className = "when"; when.textContent = r.when; li.append(when); return li;
+  });
+  fill("notes", state.notes, "No notes yet", n => {
+    const li = document.createElement("li"), body = document.createElement("span");
+    li.textContent = n.title; body.className = "when"; body.textContent = n.body; li.append(body); return li;
+  });
+}
+
+async function checkReminders() {
+  let due;
+  try { due = await api("/api/reminders/due"); } catch { return; }
+  for (const r of due) {
+    add("reminder", "⏰ Reminder: " + r.text);
+    if (window.Notification && Notification.permission === "granted") new Notification("Reminder", {body: r.text});
+  }
+  if (due.length) refreshSidebar();
+}
+
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = box.value.trim();
+  if (!text || send.disabled) return;
+  if (window.Notification && Notification.permission === "default") Notification.requestPermission();
+  add("user", text);
+  box.value = ""; box.style.height = "auto";
+  send.disabled = true;
+  const waiting = add("note", "Thinking…");
+  try {
+    const data = await api("/api/chat", {message: text});
+    waiting.remove();
+    add("assistant", data.reply);
+  } catch (err) {
+    waiting.remove();
+    add("error", err.message);
+  }
+  send.disabled = false;
+  box.focus();
+  refreshSidebar();
+});
+
+box.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+});
+box.addEventListener("input", () => { box.style.height = "auto"; box.style.height = box.scrollHeight + "px"; });
+
+document.getElementById("clear").onclick = async () => { await api("/api/clear", {}); showEmpty(); };
+
+(async () => {
+  showEmpty();
+  try { for (const m of await api("/api/history")) add(m.role, m.content); } catch {}
+  refreshSidebar();
+  checkReminders();
+  setInterval(checkReminders, 20000);
+})();
+</script>
+</body>
+</html>

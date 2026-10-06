@@ -1,0 +1,17 @@
+# Your personal data (chat history, to-dos, notes, reminders) stays off GitHub
+data/
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.env
