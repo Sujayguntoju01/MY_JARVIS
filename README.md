@@ -43,7 +43,7 @@ Activate the environment:
 Then install:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ## Running it
@@ -133,8 +133,8 @@ The docstring matters: it is what the model reads to decide when to use the tool
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-pytest
+python -m pip install -r requirements-dev.txt
+python -m pytest
 ```
 
 The tests use a scripted stand-in for the model, so they run without Ollama.
